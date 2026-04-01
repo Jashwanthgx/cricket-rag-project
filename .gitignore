@@ -1,0 +1,12 @@
+# Ignore the raw match data folders
+Cric_demo/
+odis_male_json/
+
+# Ignore processed data and logs
+cricket_rag_data.jsonl
+__pycache__/
+
+# Ignore environment/secret files
+.env
+.zenflow
+.zencoder

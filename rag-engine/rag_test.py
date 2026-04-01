@@ -1,0 +1,188 @@
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+
+import json
+import uuid
+import re
+import ollama
+from qdrant_client import QdrantClient
+from qdrant_client.models import VectorParams, Distance, PointStruct
+from sentence_transformers import SentenceTransformer
+
+# ── 1. Connection Setup ────────────────────────────────────────────────────────
+QDRANT_URL     = "https://922f9913-1f6e-4d54-b394-bd41a95170ca.us-east4-0.gcp.cloud.qdrant.io"
+QDRANT_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.32lYkMgpft2UmFYiTsizXKRzORc0iu4GvJGl15rzQMw"
+COLLECTION     = "cricket_pro"
+
+client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+model  = SentenceTransformer("all-MiniLM-L6-v2")
+
+# ── 2. Load Match Summaries ────────────────────────────────────────────────────
+if not os.path.exists("cricket_rag_data.jsonl"):
+    print("Error: 'cricket_rag_data.jsonl' not found!")
+    exit()
+
+documents = []
+payloads  = []
+
+with open("cricket_rag_data.jsonl", "r") as f:
+    for line in f:
+        data = json.loads(line)
+        documents.append(data["text"])
+        payloads.append({
+            "text":            data["text"],
+            "team1":           data.get("team1", ""),
+            "team2":           data.get("team2", ""),
+            "date":            data.get("date", ""),
+            "venue":           data.get("venue", ""),
+            "winner":          data.get("winner", ""),
+            "mom":             data.get("mom", ""),
+            "top_scorer":      data.get("top_scorer", "N/A"),
+            "top_scorer_runs": data.get("top_scorer_runs", 0),
+            "top_bowler":      data.get("top_bowler", "N/A")
+        })
+
+print(f"Loaded {len(documents)} summaries.")
+
+# ── 3. Build / Reuse Collection ────────────────────────────────────────────────
+embeddings = model.encode(documents, show_progress_bar=True)
+
+rebuild = True
+try:
+    print("Refreshing collection to update data structure...")
+    client.delete_collection(COLLECTION)
+except Exception:
+    pass
+
+if rebuild:
+    client.create_collection(
+        collection_name=COLLECTION,
+        vectors_config=VectorParams(size=len(embeddings[0]), distance=Distance.COSINE),
+    )
+    points = [
+        PointStruct(id=str(uuid.uuid4()), vector=embeddings[i].tolist(), payload=payloads[i])
+        for i in range(len(documents))
+    ]
+    batch_size = 50
+    for start in range(0, len(points), batch_size):
+        client.upsert(collection_name=COLLECTION, points=points[start:start+batch_size])
+    print(f"All {len(documents)} matches successfully stored in Qdrant.")
+
+# ── 4. Dynamic Aggregate & Player Detection ──────────────────────────────────
+AGGREGATE_PATTERNS = [
+    r"\bhow many\b", r"\btotal\b", r"\bcount\b", r"\blist all\b",
+    r"\bmost\b", r"\bhighest\b", r"\bbest\b", r"\baverage\b",
+    r"\bevery\b", r"\bwho won\b", r"\bsummarize\b"
+]
+
+def is_aggregate_query(q: str) -> bool:
+    q_lower = q.lower()
+    if any(re.search(p, q_lower) for p in AGGREGATE_PATTERNS):
+        return True
+    
+    cricket_terms = ["runs", "wickets", "match", "played", "score", "century", "mom"]
+    words = q.split()
+    has_potential_name = any(word[0].isupper() for word in words[1:] if len(word) > 0)
+    has_cricket_intent = any(term in q_lower for term in cricket_terms)
+    
+    return has_potential_name and has_cricket_intent
+
+# ── 5. Query Loop ──────────────────────────────────────────────────────────────
+print("\n" + "="*50)
+print("Cricket RAG Assistant (Llama 3) | type 'quit' to exit")
+print("="*50)
+
+while True:
+    query = input("\nAsk something about the matches: ").strip()
+    if query.lower() in ("quit", "exit", "q"):
+        break
+    if not query:
+        continue
+
+    query_vector = model.encode(query).tolist()
+
+    if is_aggregate_query(query):
+        # 1. Get Top 5 matches semantically (to find specific player/match names in detail)
+        priority_results = client.query_points(
+            collection_name=COLLECTION,
+            query=query_vector,
+            limit=5
+        ).points
+        
+        # 2. Get all matches for the counting/aggregate logic
+        all_results = client.query_points(
+            collection_name=COLLECTION,
+            query=query_vector,
+            limit=len(documents)
+        ).points
+
+        print(f"[Aggregate Query] - Analyzing all {len(all_results)} records using Hybrid Context...")
+        
+        # Build the Hybrid Context
+        context_text = "PRIORITY MATCH RECORDS (FULL DETAIL):\n"
+        for i, res in enumerate(priority_results):
+            context_text += f"MATCH {i+1}: {res.payload.get('text')}\n\n"
+            
+        context_text += "COMPLETE DATABASE LIST (FOR COUNTING/TOTALS):\n"
+        for i, res in enumerate(all_results):
+            p = res.payload
+            context_text += (f"ID {i+1}: {p.get('team1')} vs {p.get('team2')} on {p.get('date')}. "
+                             f"Winner: {p.get('winner')}. MoM: {p.get('mom')}. "
+                             f"Top Scorer: {p.get('top_scorer')} ({p.get('top_scorer_runs')} runs).\n")
+    else:
+        # Standard semantic search for specific, non-aggregate questions
+        search_result = client.query_points(
+            collection_name=COLLECTION,
+            query=query_vector,
+            limit=5,
+        ).points
+        context_text = ""
+        for i, res in enumerate(search_result):
+            context_text += f"MATCH RECORD #{i+1}:\n{res.payload.get('text', '')}\n\n"
+
+    if not context_text:
+        print("No relevant match data found.")
+        continue
+
+    # ── 6. Llama 3 Prompting ──────────────────────────────────────────────────
+    prompt = f"""You are a strict Cricket Statistics Assistant. 
+    INSTRUCTIONS:
+    1. Answer ONLY using the DATABASE RECORDS provided below.
+    2. If a player or result is NOT in the records, say "I don't have that information."
+    3. Do NOT use your own knowledge (e.g., about Virat Kohli's real-world stats).
+    4. Base counts and totals solely on the listed records.
+
+    {context_text.strip()}
+
+    Question: {query}
+    Answer:"""
+
+    print("Querying Llama 3...")
+
+    try:
+        response = ollama.generate(
+            model="llama3",
+            prompt=prompt,
+            options={
+                "temperature": 0.0,
+                "stop": ["MATCH RECORD #", "PRIORITY MATCH RECORDS"], 
+                "num_predict": 700, # Increased further to handle hybrid context length
+            },
+        )
+        answer = response["response"].strip()
+    except Exception as e:
+        print(f"Error calling Llama 3: {e}")
+        response = ollama.generate(
+            model="tinyllama",
+            prompt=prompt,
+            options={"temperature": 0.0, "num_predict": 400},
+        )
+        answer = response["response"].strip()
+
+    print("\n" + "="*40)
+    print("ANSWER:")
+    print(answer)
+    print("="*40)
+
+client.close()
