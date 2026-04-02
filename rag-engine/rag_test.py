@@ -10,7 +10,6 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, PointStruct
 from sentence_transformers import SentenceTransformer
 
-# ── 1. Connection Setup ────────────────────────────────────────────────────────
 QDRANT_URL     = "https://922f9913-1f6e-4d54-b394-bd41a95170ca.us-east4-0.gcp.cloud.qdrant.io"
 QDRANT_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.32lYkMgpft2UmFYiTsizXKRzORc0iu4GvJGl15rzQMw"
 COLLECTION     = "cricket_pro"
@@ -18,7 +17,6 @@ COLLECTION     = "cricket_pro"
 client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 model  = SentenceTransformer("all-MiniLM-L6-v2")
 
-# ── 2. Load Match Summaries ────────────────────────────────────────────────────
 if not os.path.exists("cricket_rag_data.jsonl"):
     print("Error: 'cricket_rag_data.jsonl' not found!")
     exit()
@@ -45,7 +43,6 @@ with open("cricket_rag_data.jsonl", "r") as f:
 
 print(f"Loaded {len(documents)} summaries.")
 
-# ── 3. Build / Reuse Collection ────────────────────────────────────────────────
 embeddings = model.encode(documents, show_progress_bar=True)
 
 rebuild = True
@@ -69,7 +66,6 @@ if rebuild:
         client.upsert(collection_name=COLLECTION, points=points[start:start+batch_size])
     print(f"All {len(documents)} matches successfully stored in Qdrant.")
 
-# ── 4. Dynamic Aggregate & Player Detection ──────────────────────────────────
 AGGREGATE_PATTERNS = [
     r"\bhow many\b", r"\btotal\b", r"\bcount\b", r"\blist all\b",
     r"\bmost\b", r"\bhighest\b", r"\bbest\b", r"\baverage\b",
@@ -88,7 +84,6 @@ def is_aggregate_query(q: str) -> bool:
     
     return has_potential_name and has_cricket_intent
 
-# ── 5. Query Loop ──────────────────────────────────────────────────────────────
 print("\n" + "="*50)
 print("Cricket RAG Assistant (Llama 3) | type 'quit' to exit")
 print("="*50)
@@ -103,14 +98,13 @@ while True:
     query_vector = model.encode(query).tolist()
 
     if is_aggregate_query(query):
-        # 1. Get Top 5 matches semantically (to find specific player/match names in detail)
+
         priority_results = client.query_points(
             collection_name=COLLECTION,
             query=query_vector,
             limit=5
         ).points
         
-        # 2. Get all matches for the counting/aggregate logic
         all_results = client.query_points(
             collection_name=COLLECTION,
             query=query_vector,
@@ -119,7 +113,6 @@ while True:
 
         print(f"[Aggregate Query] - Analyzing all {len(all_results)} records using Hybrid Context...")
         
-        # Build the Hybrid Context
         context_text = "PRIORITY MATCH RECORDS (FULL DETAIL):\n"
         for i, res in enumerate(priority_results):
             context_text += f"MATCH {i+1}: {res.payload.get('text')}\n\n"
@@ -131,7 +124,7 @@ while True:
                              f"Winner: {p.get('winner')}. MoM: {p.get('mom')}. "
                              f"Top Scorer: {p.get('top_scorer')} ({p.get('top_scorer_runs')} runs).\n")
     else:
-        # Standard semantic search for specific, non-aggregate questions
+        
         search_result = client.query_points(
             collection_name=COLLECTION,
             query=query_vector,
@@ -145,7 +138,6 @@ while True:
         print("No relevant match data found.")
         continue
 
-    # ── 6. Llama 3 Prompting ──────────────────────────────────────────────────
     prompt = f"""You are a strict Cricket Statistics Assistant. 
     INSTRUCTIONS:
     1. Answer ONLY using the DATABASE RECORDS provided below.
@@ -167,7 +159,7 @@ while True:
             options={
                 "temperature": 0.0,
                 "stop": ["MATCH RECORD #", "PRIORITY MATCH RECORDS"], 
-                "num_predict": 700, # Increased further to handle hybrid context length
+                "num_predict": 700, 
             },
         )
         answer = response["response"].strip()

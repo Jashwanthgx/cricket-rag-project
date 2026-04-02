@@ -27,7 +27,6 @@ for file_name in files:
 
     processed_matches += 1
 
-    # ── Basic Info ──────────────────────────────────────────────────────────
     date     = data["info"]["dates"][0]          
     venue    = data["info"]["venue"]
     teams    = data["info"]["teams"]
@@ -38,7 +37,6 @@ for file_name in files:
     print("Teams:", " vs ".join(teams))
     print("Man of the Match:", mom)
 
-    # ── Per-innings stat tracking ────────────────────────────────────────────
     def process_innings(innings_data):
         batsmen = {}
         bowlers = {}
@@ -51,7 +49,6 @@ for file_name in files:
                 is_wide   = "wides"   in extras
                 is_noball = "noballs" in extras
 
-                # Batter stats
                 batter = delivery["batter"]
                 if batter not in batsmen:
                     batsmen[batter] = {"runs": 0, "balls": 0}
@@ -59,7 +56,6 @@ for file_name in files:
                 if not is_wide and not is_noball:
                     batsmen[batter]["balls"] += 1
 
-                # Bowler stats
                 bowler = delivery["bowler"]
                 if bowler not in bowlers:
                     bowlers[bowler] = {"runs": 0, "balls": 0, "wickets": 0}
@@ -77,7 +73,6 @@ for file_name in files:
     bat1, bowl1, first_total_runs  = process_innings(data["innings"][0])
     bat2, bowl2, second_total_runs = process_innings(data["innings"][1])
 
-    # Merge stats
     batsmen_stats = {}
     for batter, stats in {**bat1, **bat2}.items():
         if batter not in batsmen_stats:
@@ -93,7 +88,6 @@ for file_name in files:
         bowler_stats[bowler]["balls"]   += stats["balls"]
         bowler_stats[bowler]["wickets"] += stats["wickets"]
 
-    # Strike rates / economy
     for batter, s in batsmen_stats.items():
         s["strike_rate"] = (s["runs"] / s["balls"]) * 100 if s["balls"] > 0 else 0
 
@@ -101,7 +95,6 @@ for file_name in files:
         overs = s["balls"] / 6
         s["economy_rate"] = s["runs"] / overs if overs > 0 else 0
 
-    # FIX D: Enhanced Tie-breaking (Scorer: balls faced; Bowler: runs conceded then economy)
     top_scorer = max(
         batsmen_stats,
         key=lambda x: (batsmen_stats[x]["runs"], -batsmen_stats[x]["balls"], x)
@@ -112,8 +105,6 @@ for file_name in files:
         key=lambda x: (bowler_stats[x]["wickets"], -bowler_stats[x]["runs"], -bowler_stats[x]["economy_rate"], x)
     )
 
-    # ── Winner determination ─────────────────────────────────────────────────
-    # FIX A: Improved Winner Logic (Handles No Results/Abandoned matches specifically)
     outcome = data["info"].get("outcome", {})
     match_status = "Completed"
     if "winner" in outcome:
@@ -131,12 +122,9 @@ for file_name in files:
         else:
             winner = "Tie/No Result"
 
-    # ── Team attribution ─────────────────────────────────────────────────────
     scorer_team = teams[0] if top_scorer in data["info"]["players"].get(teams[0], []) else teams[1]
     bowler_team = teams[0] if top_bowler in data["info"]["players"].get(teams[0], []) else teams[1]
 
-    # ── Build enriched summary text ──────────────────────────────────────────
-    # FIX E + F: Enhanced grounding with Match Status and detailed bowling stats
     match_summary_text = (
         f"Match: {teams[0]} vs {teams[1]} ({match_status})\n"
         f"Date: {date} | Venue: {venue}\n"
@@ -168,7 +156,6 @@ print("\nTotal Files Checked:", match_count)
 print("Total Matches Processed:", processed_matches)
 print(f"Total Summaries Stored: {len(match_summaries)}")
 
-# ── Write JSONL ───────────────────────────────────────────────────────────────
 output_rag_file = "cricket_rag_data.jsonl"
 with open(output_rag_file, "w") as f:
     for i, summary in enumerate(match_summaries):
