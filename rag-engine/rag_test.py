@@ -45,26 +45,26 @@ print(f"Loaded {len(documents)} summaries.")
 
 embeddings = model.encode(documents, show_progress_bar=True)
 
-rebuild = True
 try:
     print("Refreshing collection to update data structure...")
     client.delete_collection(COLLECTION)
 except Exception:
     pass
 
-if rebuild:
-    client.create_collection(
-        collection_name=COLLECTION,
-        vectors_config=VectorParams(size=len(embeddings[0]), distance=Distance.COSINE),
-    )
-    points = [
-        PointStruct(id=str(uuid.uuid4()), vector=embeddings[i].tolist(), payload=payloads[i])
-        for i in range(len(documents))
-    ]
-    batch_size = 50
-    for start in range(0, len(points), batch_size):
-        client.upsert(collection_name=COLLECTION, points=points[start:start+batch_size])
-    print(f"All {len(documents)} matches successfully stored in Qdrant.")
+client.create_collection(
+    collection_name=COLLECTION,
+    vectors_config=VectorParams(size=len(embeddings[0]), distance=Distance.COSINE),
+)
+
+points = [
+    PointStruct(id=str(uuid.uuid4()), vector=embeddings[i].tolist(), payload=payloads[i])
+    for i in range(len(documents))
+]
+
+batch_size = 50
+for start in range(0, len(points), batch_size):
+    client.upsert(collection_name=COLLECTION, points=points[start:start+batch_size])
+print(f"All {len(documents)} matches successfully stored in Qdrant.")
 
 AGGREGATE_PATTERNS = [
     r"\bhow many\b", r"\btotal\b", r"\bcount\b", r"\blist all\b",
@@ -85,7 +85,7 @@ def is_aggregate_query(q: str) -> bool:
     return has_potential_name and has_cricket_intent
 
 print("\n" + "="*50)
-print("Cricket RAG Assistant (Llama 3) | type 'quit' to exit")
+print("Cricket RAG Assistant (STRICT LLAMA 3) | type 'quit' to exit")
 print("="*50)
 
 while True:
@@ -98,7 +98,6 @@ while True:
     query_vector = model.encode(query).tolist()
 
     if is_aggregate_query(query):
-
         priority_results = client.query_points(
             collection_name=COLLECTION,
             query=query_vector,
@@ -111,20 +110,19 @@ while True:
             limit=len(documents)
         ).points
 
-        print(f"[Aggregate Query] - Analyzing all {len(all_results)} records using Hybrid Context...")
+        print(f"[Aggregate Query] - Scanning all {len(all_results)} records using Llama 3...")
         
         context_text = "PRIORITY MATCH RECORDS (FULL DETAIL):\n"
         for i, res in enumerate(priority_results):
             context_text += f"MATCH {i+1}: {res.payload.get('text')}\n\n"
             
-        context_text += "COMPLETE DATABASE LIST (FOR COUNTING/TOTALS):\n"
+        context_text += "COMPLETE DATABASE LIST:\n"
         for i, res in enumerate(all_results):
             p = res.payload
             context_text += (f"ID {i+1}: {p.get('team1')} vs {p.get('team2')} on {p.get('date')}. "
                              f"Winner: {p.get('winner')}. MoM: {p.get('mom')}. "
                              f"Top Scorer: {p.get('top_scorer')} ({p.get('top_scorer_runs')} runs).\n")
     else:
-        
         search_result = client.query_points(
             collection_name=COLLECTION,
             query=query_vector,
@@ -138,13 +136,15 @@ while True:
         print("No relevant match data found.")
         continue
 
+    # ── 6. PURE Llama 3 Execution ─────────────────────────────────────────────
     prompt = f"""You are a strict Cricket Statistics Assistant. 
     INSTRUCTIONS:
     1. Answer ONLY using the DATABASE RECORDS provided below.
     2. If a player or result is NOT in the records, say "I don't have that information."
-    3. Do NOT use your own knowledge (e.g., about Virat Kohli's real-world stats).
-    4. Base counts and totals solely on the listed records.
+    3. Do NOT use outside knowledge.
+    4. Base totals and win counts strictly on the IDs listed.
 
+    RECORDS:
     {context_text.strip()}
 
     Question: {query}
@@ -152,25 +152,16 @@ while True:
 
     print("Querying Llama 3...")
 
-    try:
-        response = ollama.generate(
-            model="llama3",
-            prompt=prompt,
-            options={
-                "temperature": 0.0,
-                "stop": ["MATCH RECORD #", "PRIORITY MATCH RECORDS"], 
-                "num_predict": 700, 
-            },
-        )
-        answer = response["response"].strip()
-    except Exception as e:
-        print(f"Error calling Llama 3: {e}")
-        response = ollama.generate(
-            model="tinyllama",
-            prompt=prompt,
-            options={"temperature": 0.0, "num_predict": 400},
-        )
-        answer = response["response"].strip()
+    response = ollama.generate(
+        model="llama3",
+        prompt=prompt,
+        options={
+            "temperature": 0.0,
+            "stop": ["MATCH RECORD #", "PRIORITY MATCH RECORDS"], 
+            "num_predict": 700, 
+        },
+    )
+    answer = response["response"].strip()
 
     print("\n" + "="*40)
     print("ANSWER:")
