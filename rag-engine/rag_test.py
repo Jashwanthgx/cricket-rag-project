@@ -85,7 +85,7 @@ def is_aggregate_query(q: str) -> bool:
     return has_potential_name and has_cricket_intent
 
 print("\n" + "="*50)
-print("Cricket RAG Assistant (STRICT LLAMA 3) | type 'quit' to exit")
+print("Cricket RAG Assistant  | type 'quit' to exit")
 print("="*50)
 
 while True:
