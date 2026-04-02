@@ -136,7 +136,6 @@ while True:
         print("No relevant match data found.")
         continue
 
-    # ── 6. PURE Llama 3 Execution ─────────────────────────────────────────────
     prompt = f"""You are a strict Cricket Statistics Assistant. 
     INSTRUCTIONS:
     1. Answer ONLY using the DATABASE RECORDS provided below.
