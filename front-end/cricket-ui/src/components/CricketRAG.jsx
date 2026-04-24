@@ -462,6 +462,205 @@ const styles = `
   ::-webkit-scrollbar { width: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #e5e5e5; }
+
+  /* TABS */
+  .tab-nav {
+    display: flex;
+    border-bottom: 2px solid #000;
+    flex-shrink: 0;
+  }
+
+  .tab-btn {
+    flex: 1;
+    padding: 14px 20px;
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    font-family: ${JETBRAINS};
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #666;
+    cursor: pointer;
+    transition: all 80ms;
+  }
+
+  .tab-btn:hover { background: #f5f5f5; color: #000; }
+  .tab-btn.active { border-bottom-color: #000; color: #000; background: #fafafa; }
+
+  /* PANELS */
+  .panel {
+    flex: 1;
+    overflow-y: auto;
+    padding: 32px 40px;
+  }
+
+  .panel-title {
+    font-family: ${PLAYFAIR};
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #000;
+  }
+
+  /* LEADERBOARD TABLE */
+  .leaderboard-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'Source Serif 4', Georgia, serif;
+    font-size: 14px;
+  }
+
+  .leaderboard-table th {
+    text-align: left;
+    padding: 12px 8px;
+    font-family: ${JETBRAINS};
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border-bottom: 2px solid #000;
+    color: #666;
+  }
+
+  .leaderboard-table td {
+    padding: 12px 8px;
+    border-bottom: 1px solid #eee;
+  }
+
+  .leaderboard-table tr:hover { background: #fafafa; }
+
+  .rank-num {
+    font-family: ${JETBRAINS};
+    font-size: 11px;
+    color: #888;
+    width: 24px;
+  }
+
+  .player-name {
+    font-weight: 600;
+  }
+
+  .stat-num {
+    font-family: ${JETBRAINS};
+    font-size: 12px;
+    color: #333;
+  }
+
+  /* COMPARISON PANEL */
+  .compare-form {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .compare-input {
+    flex: 1;
+    padding: 12px 16px;
+    border: 2px solid #e5e5e5;
+    font-family: 'Source Serif 4', Georgia, serif;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 80ms;
+  }
+
+  .compare-input:focus { border-color: #000; }
+
+  .compare-btn {
+    padding: 12px 24px;
+    background: #000;
+    border: none;
+    color: #fff;
+    font-family: ${JETBRAINS};
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 80ms;
+  }
+
+  .compare-btn:hover { background: #333; }
+  .compare-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .comparison-result {
+    background: #fafafa;
+    border-left: 4px solid #000;
+    padding: 20px 24px;
+  }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 24px;
+    margin-top: 16px;
+  }
+
+  .player-card {
+    background: #fff;
+    border: 1px solid #e5e5e5;
+    padding: 16px;
+  }
+
+  .player-card-title {
+    font-family: ${JETBRAINS};
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #666;
+    margin-bottom: 12px;
+  }
+
+  .player-card-stat {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 14px;
+  }
+
+  .player-card-stat:last-child { border-bottom: none; }
+
+  .stat-label { color: #666; }
+  .stat-value { font-family: ${JETBRAINS}; font-size: 13px; }
+
+  .vs-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #000;
+    color: #fff;
+    font-family: ${PLAYFAIR};
+    font-weight: 700;
+    font-size: 12px;
+  }
+
+  .career-result {
+    background: #fafafa;
+    border-left: 4px solid #000;
+    padding: 20px 24px;
+    margin-top: 16px;
+  }
+
+  .career-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-top: 16px;
+  }
+
+  .career-section-title {
+    font-family: ${JETBRAINS};
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #666;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #ddd;
+  }
 `;
 
 const HINTS = [
@@ -488,6 +687,15 @@ export default function CricketRAG() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [health, setHealth] = useState(null);
+  const [activeTab, setActiveTab] = useState("chat"); // "chat", "leaderboard", "compare"
+  const [leaderboard, setLeaderboard] = useState({ batting: [], bowling: [] });
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [comparePlayers, setComparePlayers] = useState({ player1: "", player2: "" });
+  const [comparisonResult, setComparisonResult] = useState(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [careerPlayer, setCareerPlayer] = useState("");
+  const [careerResult, setCareerResult] = useState(null);
+  const [careerLoading, setCareerLoading] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -499,6 +707,56 @@ export default function CricketRAG() {
       .then((d) => setHealth(d))
       .catch(() => setHealth(null));
   }, []);
+
+  const fetchLeaderboard = async () => {
+    setLeaderboardLoading(true);
+    try {
+      const [batRes, bowlRes] = await Promise.all([
+        fetch(`${BACKEND_URL}/analytics/leaderboard/batting?limit=15`),
+        fetch(`${BACKEND_URL}/analytics/leaderboard/bowling?limit=15`)
+      ]);
+      const batData = await batRes.json();
+      const bowlData = await bowlRes.json();
+      setLeaderboard({ batting: batData.leaderboard || [], bowling: bowlData.leaderboard || [] });
+    } catch (err) {
+      console.error("Failed to fetch leaderboard:", err);
+    }
+    setLeaderboardLoading(false);
+  };
+
+  const handleCompare = async () => {
+    if (!comparePlayers.player1 || !comparePlayers.player2) return;
+    setCompareLoading(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/analytics/compare-players`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(comparePlayers)
+      });
+      const data = await res.json();
+      setComparisonResult(data);
+    } catch (err) {
+      console.error("Comparison failed:", err);
+    }
+    setCompareLoading(false);
+  };
+
+  const handleCareerLookup = async () => {
+    if (!careerPlayer.trim()) return;
+    setCareerLoading(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/analytics/career-totals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ player_name: careerPlayer })
+      });
+      const data = await res.json();
+      setCareerResult(data);
+    } catch (err) {
+      console.error("Career lookup failed:", err);
+    }
+    setCareerLoading(false);
+  };
 
   useEffect(() => {
     if (messagesEndRef.current) {

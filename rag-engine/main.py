@@ -84,22 +84,51 @@ for idx, file_name in enumerate(files):
             enriched_bowlers[b] = {**s, "e": econ}
 
         # Identify match heroes for the semantic text field
-        top_s = max(enriched_batters, key=lambda x: enriched_batters[x]["r"])
-        top_b = max(enriched_bowlers, key=lambda x: (enriched_bowlers[x]["w"], -enriched_bowlers[x]["e"]))
+        top_s = max(enriched_batters, key=lambda x: enriched_batters[x]["r"]) if enriched_batters else None
+        top_b = max(enriched_bowlers, key=lambda x: (enriched_bowlers[x]["w"], -enriched_bowlers[x]["e"])) if enriched_bowlers else None
 
         summary_text = (
             f"Match: {teams[0]} vs {teams[1]} | Winner: {winner} | Date: {date} | Venue: {venue}\n"
             f"Scores: {teams[0]} {runs1}, {teams[1]} {runs2}\n"
             f"Top Performer: {top_s} scored {enriched_batters[top_s]['r']} runs. "
             f"{top_b} took {enriched_bowlers[top_b]['w']} wickets."
-        )
+        ) if top_s and top_b else f"Match: {teams[0]} vs {teams[1]} | Winner: {winner} | Date: {date} | Venue: {venue}"
+
+        # Flatten batter and bowler stats for easier querying
+        batters_flat = []
+        for player, stats in enriched_batters.items():
+            batters_flat.append({
+                "name": player,
+                "runs": stats["r"],
+                "balls": stats["b"],
+                "fours": stats["4s"],
+                "sixes": stats["6s"],
+                "sr": stats["sr"],
+                "innings": 1
+            })
+
+        bowlers_flat = []
+        for player, stats in enriched_bowlers.items():
+            bowlers_flat.append({
+                "name": player,
+                "runs_conceded": stats["r"],
+                "balls_bowled": stats["b"],
+                "wickets": stats["w"],
+                "economy": stats["e"],
+                "innings": 1
+            })
 
         match_summaries.append({
             "text": summary_text,
             "team1": teams[0], "team2": teams[1],
             "date": date, "venue": venue, "winner": winner, "mom": mom,
-            "all_match_batters": enriched_batters,
-            "all_match_bowlers": enriched_bowlers,
+            "top_scorer": top_s if top_s else "N/A",
+            "top_scorer_runs": enriched_batters[top_s]["r"] if top_s else 0,
+            "top_bowler": top_b if top_b else "N/A",
+            "top_bowler_wickets": enriched_bowlers[top_b]["w"] if top_b else 0,
+            "top_bowler_economy": enriched_bowlers[top_b]["e"] if top_b else 0.0,
+            "all_match_batters": batters_flat,
+            "all_match_bowlers": bowlers_flat,
             "chased_win": (winner == teams[1] and runs2 > runs1)
         })
 

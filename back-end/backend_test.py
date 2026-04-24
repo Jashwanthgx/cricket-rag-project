@@ -114,6 +114,10 @@ def build_context(query_vector, query_type: str) -> tuple[str, int]:
         win_counts           = Counter()
         mom_counts           = Counter()
         total_player_wickets = Counter()
+        total_player_runs    = Counter()
+        total_player_balls   = Counter()
+        total_player_fours   = Counter()
+        total_player_sixes   = Counter()
         scorer_runs          = {}
         bowler_wickets       = {}
         bowler_economies     = {}
@@ -137,12 +141,24 @@ def build_context(query_vector, query_type: str) -> tuple[str, int]:
                 if scorer not in scorer_runs or runs > scorer_runs[scorer]:
                     scorer_runs[scorer] = runs
 
-            for b_name, stats in p.get("all_match_bowlers", {}).items():
-                total_player_wickets[b_name] += stats.get("w", 0)
-                econ = stats.get("e", 0.0)
-                if econ is not None:
-                    if b_name not in bowler_economies or econ < bowler_economies[b_name]:
-                        bowler_economies[b_name] = econ
+            # Aggregate from all_match_batters list
+            for batter in p.get("all_match_batters", []):
+                name = batter.get("name", "")
+                if name:
+                    total_player_runs[name] += batter.get("runs", 0)
+                    total_player_balls[name] += batter.get("balls", 0)
+                    total_player_fours[name] += batter.get("fours", 0)
+                    total_player_sixes[name] += batter.get("sixes", 0)
+
+            # Aggregate from all_match_bowlers list
+            for bowler_stat in p.get("all_match_bowlers", []):
+                name = bowler_stat.get("name", "")
+                if name:
+                    total_player_wickets[name] += bowler_stat.get("wickets", 0)
+                    econ = bowler_stat.get("economy", 0.0)
+                    if econ is not None and econ > 0:
+                        if name not in bowler_economies or econ < bowler_economies[name]:
+                            bowler_economies[name] = econ
 
             if bowler:
                 if bowler not in bowler_wickets or wickets > bowler_wickets[bowler]:
@@ -159,6 +175,14 @@ def build_context(query_vector, query_type: str) -> tuple[str, int]:
         ctx += "\nMAN OF THE MATCH COUNTS:\n"
         for player, count in mom_counts.most_common(50):
             ctx += f"  {player}: {count} awards\n"
+
+        ctx += "\nTOTAL RUNS ACROSS ALL MATCHES:\n"
+        for player, runs in total_player_runs.most_common(50):
+            balls = total_player_balls.get(player, 0)
+            sr = round((runs / balls * 100), 2) if balls > 0 else 0
+            fours = total_player_fours.get(player, 0)
+            sixes = total_player_sixes.get(player, 0)
+            ctx += f"  {player}: {runs} runs ({balls} balls, SR: {sr}, 4s: {fours}, 6s: {sixes})\n"
 
         ctx += "\nTOTAL WICKETS ACROSS ALL MATCHES:\n"
         for player, count in total_player_wickets.most_common(50):
@@ -283,7 +307,8 @@ def ingest():
                 "top_bowler":         d.get("top_bowler", "N/A"),
                 "top_bowler_wickets": d.get("top_bowler_wickets", 0),
                 "top_bowler_economy": d.get("top_bowler_economy", 0.0),
-                "all_match_bowlers":  d.get("all_match_bowlers", {}),
+                "all_match_batters":  d.get("all_match_batters", []),
+                "all_match_bowlers":  d.get("all_match_bowlers", []),
                 "chased_win":         d.get("chased_win", False),
             })
 
@@ -311,3 +336,263 @@ def ingest():
     total_docs = len(documents)
 
     return IngestResponse(message="Ingestion complete.", total_ingested=len(documents))
+
+
+# ==================== ANALYTICS ENDPOINTS ====================
+
+class PlayerComparisonRequest(BaseModel):
+    player1: str
+    player2: str
+
+class PlayerComparisonResponse(BaseModel):
+    player1: str
+    player2: str
+    player1_stats: dict
+    player2_stats: dict
+    comparison: str
+
+class CareerTotalsRequest(BaseModel):
+    player_name: str
+
+class CareerTotalsResponse(BaseModel):
+    player_name: str
+    batting: dict
+    bowling: dict
+    matches_played: int
+
+class HeadToHeadRequest(BaseModel):
+    batter_name: str
+    bowler_name: str
+
+class HeadToHeadResponse(BaseModel):
+    batter_name: str
+    bowler_name: str
+    dismissals: int
+    runs_scored: int
+    balls_faced: int
+    times_out: int
+    matches: int
+
+
+def aggregate_player_stats(all_matches: list) -> dict:
+    """Aggregate career stats for all players from match data."""
+    player_career = {}
+
+    for r in all_matches:
+        p = r.payload
+
+        # Aggregate batting stats
+        for batter in p.get("all_match_batters", []):
+            name = batter.get("name", "")
+            if name not in player_career:
+                player_career[name] = {
+                    "batting": {"runs": 0, "balls": 0, "fours": 0, "sixes": 0, "innings": 0},
+                    "bowling": {"wickets": 0, "runs_conceded": 0, "balls_bowled": 0, "innings": 0},
+                    "matches": set()
+                }
+            player_career[name]["batting"]["runs"] += batter.get("runs", 0)
+            player_career[name]["batting"]["balls"] += batter.get("balls", 0)
+            player_career[name]["batting"]["fours"] += batter.get("fours", 0)
+            player_career[name]["batting"]["sixes"] += batter.get("sixes", 0)
+            player_career[name]["batting"]["innings"] += 1
+            player_career[name]["matches"].add(p.get("date", "") + p.get("team1", "") + p.get("team2", ""))
+
+        # Aggregate bowling stats
+        for bowler in p.get("all_match_bowlers", []):
+            name = bowler.get("name", "")
+            if name not in player_career:
+                player_career[name] = {
+                    "batting": {"runs": 0, "balls": 0, "fours": 0, "sixes": 0, "innings": 0},
+                    "bowling": {"wickets": 0, "runs_conceded": 0, "balls_bowled": 0, "innings": 0},
+                    "matches": set()
+                }
+            player_career[name]["bowling"]["wickets"] += bowler.get("wickets", 0)
+            player_career[name]["bowling"]["runs_conceded"] += bowler.get("runs_conceded", 0)
+            player_career[name]["bowling"]["balls_bowled"] += bowler.get("balls_bowled", 0)
+            player_career[name]["bowling"]["innings"] += 1
+            player_career[name]["matches"].add(p.get("date", "") + p.get("team1", "") + p.get("team2", ""))
+
+    # Convert sets to counts and calculate derived stats
+    for name, stats in player_career.items():
+        stats["matches_played"] = len(stats["matches"])
+        del stats["matches"]
+
+        # Batting derived stats
+        balls = stats["batting"]["balls"]
+        runs = stats["batting"]["runs"]
+        stats["batting"]["strike_rate"] = round((runs / balls * 100), 2) if balls > 0 else 0.0
+        stats["batting"]["average"] = round(runs / max(1, stats["batting"]["innings"]), 2)
+
+        # Bowling derived stats
+        overs = stats["bowling"]["balls_bowled"] / 6
+        wickets = stats["bowling"]["wickets"]
+        runs_conceded = stats["bowling"]["runs_conceded"]
+        stats["bowling"]["economy"] = round(runs_conceded / overs, 2) if overs > 0 else 0.0
+        stats["bowling"]["average"] = round(runs_conceded / max(1, wickets), 2)
+
+    return player_career
+
+
+@app.post("/analytics/compare-players", response_model=PlayerComparisonResponse)
+async def compare_players(req: PlayerComparisonRequest):
+    """Compare career statistics between two players."""
+    all_matches = qdrant_client.scroll(
+        collection_name=COLLECTION, limit=10000, with_payload=True, with_vectors=False
+    )[0]
+
+    player_stats = aggregate_player_stats(all_matches)
+
+    p1_stats = player_stats.get(req.player1, {
+        "batting": {"runs": 0, "balls": 0, "fours": 0, "sixes": 0, "innings": 0, "strike_rate": 0, "average": 0},
+        "bowling": {"wickets": 0, "runs_conceded": 0, "balls_bowled": 0, "innings": 0, "economy": 0, "average": 0},
+        "matches_played": 0
+    })
+
+    p2_stats = player_stats.get(req.player2, {
+        "batting": {"runs": 0, "balls": 0, "fours": 0, "sixes": 0, "innings": 0, "strike_rate": 0, "average": 0},
+        "bowling": {"wickets": 0, "runs_conceded": 0, "balls_bowled": 0, "innings": 0, "economy": 0, "average": 0},
+        "matches_played": 0
+    })
+
+    comparison = []
+    if p1_stats["batting"]["runs"] > p2_stats["batting"]["runs"]:
+        comparison.append(f"{req.player1} has scored more career runs ({p1_stats['batting']['runs']} vs {p2_stats['batting']['runs']})")
+    elif p2_stats["batting"]["runs"] > p1_stats["batting"]["runs"]:
+        comparison.append(f"{req.player2} has scored more career runs ({p2_stats['batting']['runs']} vs {p1_stats['batting']['runs']})")
+
+    if p1_stats["bowling"]["wickets"] > p2_stats["bowling"]["wickets"]:
+        comparison.append(f"{req.player1} has taken more wickets ({p1_stats['bowling']['wickets']} vs {p2_stats['bowling']['wickets']})")
+    elif p2_stats["bowling"]["wickets"] > p1_stats["bowling"]["wickets"]:
+        comparison.append(f"{req.player2} has taken more wickets ({p2_stats['bowling']['wickets']} vs {p1_stats['bowling']['wickets']})")
+
+    if p1_stats["batting"]["strike_rate"] > p2_stats["batting"]["strike_rate"] and p1_stats["batting"]["balls"] > 0:
+        comparison.append(f"{req.player1} has a better strike rate ({p1_stats['batting']['strike_rate']} vs {p2_stats['batting']['strike_rate']})")
+    elif p2_stats["batting"]["strike_rate"] > p1_stats["batting"]["strike_rate"] and p2_stats["batting"]["balls"] > 0:
+        comparison.append(f"{req.player2} has a better strike rate ({p2_stats['batting']['strike_rate']} vs {p1_stats['batting']['strike_rate']})")
+
+    return PlayerComparisonResponse(
+        player1=req.player1,
+        player2=req.player2,
+        player1_stats=p1_stats,
+        player2_stats=p2_stats,
+        comparison=" | ".join(comparison) if comparison else "Players have similar statistics"
+    )
+
+
+@app.post("/analytics/career-totals", response_model=CareerTotalsResponse)
+async def get_career_totals(req: CareerTotalsRequest):
+    """Get lifetime career totals for a specific player."""
+    all_matches = qdrant_client.scroll(
+        collection_name=COLLECTION, limit=10000, with_payload=True, with_vectors=False
+    )[0]
+
+    player_stats = aggregate_player_stats(all_matches)
+
+    stats = player_stats.get(req.player_name, {
+        "batting": {"runs": 0, "balls": 0, "fours": 0, "sixes": 0, "innings": 0, "strike_rate": 0, "average": 0},
+        "bowling": {"wickets": 0, "runs_conceded": 0, "balls_bowled": 0, "innings": 0, "economy": 0, "average": 0},
+        "matches_played": 0
+    })
+
+    return CareerTotalsResponse(
+        player_name=req.player_name,
+        batting=stats["batting"],
+        bowling=stats["bowling"],
+        matches_played=stats["matches_played"]
+    )
+
+
+@app.post("/analytics/head-to-head", response_model=HeadToHeadResponse)
+async def get_batter_vs_bowler(req: HeadToHeadRequest):
+    """Get head-to-head stats between a batter and bowler."""
+    all_matches = qdrant_client.scroll(
+        collection_name=COLLECTION, limit=10000, with_payload=True, with_vectors=False
+    )[0]
+
+    total_runs = 0
+    total_balls = 0
+    total_dismissals = 0
+    matches_faced = 0
+
+    for r in all_matches:
+        p = r.payload
+        match_found = False
+
+        # Check if batter faced this bowler in this match
+        for batter in p.get("all_match_batters", []):
+            if batter.get("name", "").lower() == req.batter_name.lower():
+                match_found = True
+                total_runs += batter.get("runs", 0)
+                total_balls += batter.get("balls", 0)
+
+        if match_found:
+            matches_faced += 1
+
+        # Count dismissals (simplified - counts bowler wickets when both players in same match)
+        for bowler in p.get("all_match_bowlers", []):
+            if bowler.get("name", "").lower() == req.bowler_name.lower() and match_found:
+                total_dismissals += bowler.get("wickets", 0)
+
+    # Cap dismissals at balls faced (sanity check)
+    times_out = min(total_dismissals, total_balls)
+
+    return HeadToHeadResponse(
+        batter_name=req.batter_name,
+        bowler_name=req.bowler_name,
+        dismissals=times_out,
+        runs_scored=total_runs,
+        balls_faced=total_balls,
+        times_out=times_out,
+        matches=matches_faced
+    )
+
+
+@app.get("/analytics/leaderboard/batting")
+async def get_batting_leaderboard(limit: int = 20):
+    """Get top batters by runs."""
+    all_matches = qdrant_client.scroll(
+        collection_name=COLLECTION, limit=10000, with_payload=True, with_vectors=False
+    )[0]
+
+    player_stats = aggregate_player_stats(all_matches)
+
+    leaderboard = []
+    for name, stats in player_stats.items():
+        if stats["batting"]["runs"] > 0:
+            leaderboard.append({
+                "name": name,
+                "runs": stats["batting"]["runs"],
+                "innings": stats["batting"]["innings"],
+                "strike_rate": stats["batting"]["strike_rate"],
+                "average": stats["batting"]["average"],
+                "fours": stats["batting"]["fours"],
+                "sixes": stats["batting"]["sixes"]
+            })
+
+    leaderboard.sort(key=lambda x: x["runs"], reverse=True)
+    return {"leaderboard": leaderboard[:limit]}
+
+
+@app.get("/analytics/leaderboard/bowling")
+async def get_bowling_leaderboard(limit: int = 20):
+    """Get top bowlers by wickets."""
+    all_matches = qdrant_client.scroll(
+        collection_name=COLLECTION, limit=10000, with_payload=True, with_vectors=False
+    )[0]
+
+    player_stats = aggregate_player_stats(all_matches)
+
+    leaderboard = []
+    for name, stats in player_stats.items():
+        if stats["bowling"]["wickets"] > 0:
+            leaderboard.append({
+                "name": name,
+                "wickets": stats["bowling"]["wickets"],
+                "innings": stats["bowling"]["innings"],
+                "economy": stats["bowling"]["economy"],
+                "average": stats["bowling"]["average"],
+                "runs_conceded": stats["bowling"]["runs_conceded"]
+            })
+
+    leaderboard.sort(key=lambda x: x["wickets"], reverse=True)
+    return {"leaderboard": leaderboard[:limit]}

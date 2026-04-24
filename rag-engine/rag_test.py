@@ -50,7 +50,8 @@ with open("cricket_rag_data.jsonl", "r") as f:
             "top_bowler":         data.get("top_bowler", "N/A"),
             "top_bowler_wickets": data.get("top_bowler_wickets", 0),
             "top_bowler_economy": data.get("top_bowler_economy", 0.0),
-            "all_match_bowlers":  data.get("all_match_bowlers", {}),
+            "all_match_batters":  data.get("all_match_batters", []),
+            "all_match_bowlers":  data.get("all_match_bowlers", []),
             "chased_win":         data.get("chased_win", False),
         })
 
@@ -144,6 +145,10 @@ while True:
         win_counts           = Counter()
         mom_counts           = Counter()
         total_player_wickets = Counter()
+        total_player_runs    = Counter()
+        total_player_balls   = Counter()
+        total_player_fours   = Counter()
+        total_player_sixes   = Counter()
         scorer_runs          = {}
         bowler_wickets       = {}
         bowler_economies     = {}
@@ -167,12 +172,24 @@ while True:
                 if scorer not in scorer_runs or runs > scorer_runs[scorer]:
                     scorer_runs[scorer] = runs
 
-            for b, stats in p.get("all_match_bowlers", {}).items():
-                total_player_wickets[b] += stats.get("w", 0)
-                econ = stats.get("e", 0.0)
-                if econ is not None:
-                    if b not in bowler_economies or econ < bowler_economies[b]:
-                        bowler_economies[b] = econ
+            # Aggregate from all_match_batters list
+            for batter in p.get("all_match_batters", []):
+                name = batter.get("name", "")
+                if name:
+                    total_player_runs[name] += batter.get("runs", 0)
+                    total_player_balls[name] += batter.get("balls", 0)
+                    total_player_fours[name] += batter.get("fours", 0)
+                    total_player_sixes[name] += batter.get("sixes", 0)
+
+            # Aggregate from all_match_bowlers list
+            for bowler_stat in p.get("all_match_bowlers", []):
+                name = bowler_stat.get("name", "")
+                if name:
+                    total_player_wickets[name] += bowler_stat.get("wickets", 0)
+                    econ = bowler_stat.get("economy", 0.0)
+                    if econ is not None and econ > 0:
+                        if name not in bowler_economies or econ < bowler_economies[name]:
+                            bowler_economies[name] = econ
 
             if bowler:
                 if bowler not in bowler_wickets or wickets > bowler_wickets[bowler]:
@@ -189,6 +206,14 @@ while True:
         context_text += "\nMAN OF THE MATCH COUNTS:\n"
         for player, count in mom_counts.most_common(50):
             context_text += f"  {player}: {count} awards\n"
+
+        context_text += "\nTOTAL RUNS ACROSS ALL MATCHES:\n"
+        for player, runs in total_player_runs.most_common(50):
+            balls = total_player_balls.get(player, 0)
+            sr = round((runs / balls * 100), 2) if balls > 0 else 0
+            fours = total_player_fours.get(player, 0)
+            sixes = total_player_sixes.get(player, 0)
+            context_text += f"  {player}: {runs} runs ({balls} balls, SR: {sr}, 4s: {fours}, 6s: {sixes})\n"
 
         context_text += "\nTOTAL WICKETS ACROSS ALL MATCHES:\n"
         for player, count in total_player_wickets.most_common(50):
