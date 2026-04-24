@@ -10,3 +10,14 @@ __pycache__/
 .env
 .zenflow
 .zencoder
+
+# Claude Code / Ollama
+.claude/
+CLAUDE.md
+
+#Sensitive files
+.env
+groq api key-.txt
+venv/
+match_data.zip
+rag-engine/tempCodeRunnerFile.py
