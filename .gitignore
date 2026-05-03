@@ -14,6 +14,7 @@ __pycache__/
 # Claude Code / Ollama
 .claude/
 CLAUDE.md
+free-claude-code/
 
 #Sensitive files
 .env
